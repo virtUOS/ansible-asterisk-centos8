@@ -1,0 +1,279 @@
+---
+
+- name: fail early if os is not supported
+  assert:
+    that: ansible_distribution == 'CentOS' and ansible_distribution_major_version == '8'
+
+- name: set timezone to Europe/Berlin
+  timezone:
+    name: Europe/Berlin
+  
+- name: install epel-release
+  package: 
+    update_cache: yes
+    name: epel-release 
+
+- name: install additional packages
+  package:
+    update_cache: yes
+    name:
+      - python3
+      - python3-dns
+
+- name: set SELinux in permissive mode (asterisk docs recommendation)
+  selinux:
+    policy: targeted
+    state: permissive
+
+- name: install pre-requisites for asterisk
+  package:
+    update_cache: yes
+    name:
+      - wget
+      - bzip2
+      - tar
+      - sqlite-devel
+      - ncurses-devel
+      - systemd-devel
+
+- name: install buildtools
+  package:
+    update_cache: yes
+    enablerepo: PowerTools
+    name:
+      - binutils
+      - gcc
+      - gcc-c++
+      - kernel-devel
+      - autoconf
+      - automake
+      - libtool
+      - libedit-devel
+      - make
+
+- name: create asterisk group
+  group:
+    name: asterisk
+    state: present
+  
+- name: create asterisk user
+  user:
+    name: asterisk
+    groups: asterisk
+    home: /var/lib/asterisk
+    comment: 'asterisk user'
+
+- name: check if asterisk is already downloaded
+  stat:
+    path: /tmp/{{ asterisk_file_name }}
+  register: stat_result
+
+- name: download asterisk
+  get_url:
+    url: "{{ asterisk_url }}{{ asterisk_file_name }}"
+    dest: /tmp
+    force: no
+    checksum: 'sha256:{{ asterisk_file_sha256 }}'
+  when: 
+    - asterisk_fresh_install == 'yes'
+    - not stat_result.stat.exists
+
+- name: remove asterisk folders content
+  file: 
+    path: '{{ item }}/'
+    state: absent
+  with_items:
+    - '{{ asterisk_install_path }}'
+    - '/etc/asterisk'
+  when: asterisk_fresh_install == 'yes'
+
+- name: ensure asterisk folders exist
+  become: yes
+  file: 
+    path: '{{ item }}'
+    state: directory
+    owner: asterisk
+    group: asterisk
+    recurse: yes
+  with_items:
+    - '{{ asterisk_install_path }}'
+    - /var/log/asterisk
+    - /var/run/asterisk
+    - /var/lib/asterisk
+    - /var/spool/asterisk
+
+- name: extract asterisk archive
+  unarchive:
+    src: '/tmp/{{ asterisk_file_name }}'
+    dest: '{{ asterisk_install_path }}'
+    remote_src: yes
+    extra_opts: [--strip-components=1]
+  when: asterisk_fresh_install == 'yes'
+
+- name: run "./contrib/scripts/install_prereq install" (let asterisk auto install missing requirements)
+  become: yes
+  command: 
+    cmd: './contrib/scripts/install_prereq install'
+    chdir: '{{ asterisk_install_path }}'
+  when: asterisk_fresh_install == 'yes'
+
+- name: run "./configure" in asterisk folder
+  become: yes
+  command: 
+    cmd: './configure'
+    chdir: '{{ asterisk_install_path }}'
+  when: asterisk_fresh_install == 'yes'
+
+- name: create menuselect.makeopts
+  command: make menuselect.makeopts chdir={{ asterisk_install_path }}
+  when: asterisk_fresh_install == 'yes'
+
+- name: menuselect configuration
+  command: '{{ item }} chdir={{ asterisk_install_path }}'
+  with_items:
+    - 'menuselect/menuselect --enable format_mp3'
+    - 'menuselect/menuselect --enable codec_opus'
+    - 'menuselect/menuselect --enable codec_g279a menuselect.makeopts'
+  when: asterisk_fresh_install == 'yes'
+
+- name: build asterisk via make
+  become: yes
+  make:
+    chdir: '{{ asterisk_install_path }}'
+  when: asterisk_fresh_install == 'yes'
+
+- name: install asterisk via make install
+  become: yes
+  make:
+    chdir: '{{ asterisk_install_path }}'
+    target: install
+  when: asterisk_fresh_install == 'yes'
+
+- name: make sample config for asterisk via make samples
+  become: yes
+  make:
+    chdir: '{{ asterisk_install_path }}'
+    target: samples
+  when: 
+    - asterisk_install_sample_config == 'yes'
+    - asterisk_fresh_install == 'yes'
+
+- name: run make config
+  become: yes
+  make:
+    chdir: '{{ asterisk_install_path }}'
+    target: config
+  when: asterisk_fresh_install == 'yes'
+
+- name: run make install-logrotate
+  become: yes
+  make:
+    chdir: '{{ asterisk_install_path }}'
+    target: install-logrotate
+  when: asterisk_fresh_install == 'yes'
+
+- name: copy asterisk service file to /usr/lib/systemd/system
+  become: yes
+  copy: 
+    src: '{{ asterisk_install_path }}/contrib/systemd/'
+    dest: /usr/lib/systemd/system
+    remote_src: yes
+
+- name: copy asterisk config file to /etc/default/asterisk
+  template:
+    src: etc_default_asterisk
+    dest: /etc/default/asterisk
+  notify: restart asterisk
+
+- name: remove sample config files fromt /etc/asterisk
+  file:
+    path: /etc/asterisk/
+    state: absent
+  when: 
+    - asterisk_install_sample_config != 'yes'
+    - asterisk_fresh_install == 'yes'
+  notify: restart asterisk
+
+- name: copy asterisk config files to /etc/asterisk
+  copy:
+    src: '{{ item }}'
+    dest: /etc/asterisk/
+  with_fileglob:
+    - "*.conf"
+  when: asterisk_install_sample_config != 'yes'
+  notify: restart asterisk
+
+- name: create template config files (/etc/asterisk/)
+  vars:
+    machines: '{{ sip_endpoints }}'
+  template:
+    src: '{{ item.src }}'
+    dest: '/etc/asterisk/{{ item.dest }}'
+  with_items:
+    - { src: 'prometheus.conf.j2', dest: 'prometheus.conf' }
+    - { src: 'http.conf.j2', dest: 'http.conf' }
+  notify: restart asterisk
+
+- name: PRODUCTION ONLY create pjsip config files (/etc/asterisk/)
+  vars:
+    machines: '{{ sip_endpoints }}'
+  template:
+    src: '{{ item.src }}'
+    dest: '/etc/asterisk/{{ item.dest }}'
+  with_items:
+    - { src: 'extensions.conf.j2', dest: 'extensions.conf' }
+    - { src: 'pjsip.conf.j2', dest: 'pjsip.conf' }
+    - { src: 'pjsip_wizard.conf.j2', dest: 'pjsip_wizard.conf' }
+  when: "'production' in group_names"
+  notify: restart asterisk
+
+- name: add /opt/asterisk/lib/libasteriskssl.so.1 to /etc/ld.so.conf
+  lineinfile:
+    path: /etc/ld.so.conf
+    line: 'include {{ asterisk_install_path }}/lib/libasteriskssl.so.1'
+  notify: restart asterisk
+
+- name: set asterisk folder permissions
+  file: 
+    path: '{{ asterisk_install_path }}'
+    state: directory
+    owner: asterisk
+    group: asterisk
+    recurse: yes
+
+- name: set asterisk folder permissions
+  become: yes
+  file: 
+    path: '{{ item.path }}'
+    state: directory
+    owner: '{{ item.owner }}'
+    group: '{{ item.group }}'
+    mode: '{{ item.mode }}'
+    recurse: yes
+  with_items:
+    - { path: '/var/log/asterisk', 
+      owner: 'asterisk', group: 'asterisk', mode: '0750' }
+    - { path: '/var/run/asterisk', 
+      owner: 'asterisk', group: 'asterisk', mode: '0750' }
+    - { path: '/var/lib/asterisk', 
+      owner: 'asterisk', group: 'asterisk', mode: '0750' }
+    - { path: '/var/spool/asterisk', 
+      owner: 'asterisk', group: 'asterisk', mode: '0750' }
+    - { path: '/etc/asterisk', 
+      owner: 'root', group: 'asterisk', mode: '0750' }
+  
+- name: enable and start asterisk.service
+  become: yes
+  systemd:
+    name: asterisk
+    state: started
+    enabled: yes
+
+- name: firewalld enable asterisk ports
+  firewalld:
+    port: '{{ item.port }}/{{ item.proto }}'
+    state: enabled
+    permanent: yes
+    immediate: yes
+  with_items:
+    - { port: '5060', proto: 'udp'} # SIP on UDP port 5060

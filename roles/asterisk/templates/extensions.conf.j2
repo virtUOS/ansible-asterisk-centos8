@@ -1,0 +1,17 @@
+[sipgate-in]
+exten => _X.,1,Noop(NO ROUTE DEFINED Incoming call ${EXTEN})
+same => n,Playback(feature-not-avail-line)
+same => n,Hangup()
+{% for machine in machines if machines[machine].create_endpoint %}
+{% if machines[machine].sip_phone and machines[machine].sip_password %}
+; {{ machines[machine].sip_phone }} TO {{ machine.split(".")[0] | lower }}
+exten => {{ machines[machine].sip_phone }},1,Noop(Incoming call ${EXTEN})
+same => n,Dial(PJSIP/${EXTEN}@{{ machine.split(".")[0] | lower }})
+same => n,Hangup()
+{% endif %}
+{% endfor %}
+
+[sipgate-out]
+exten => _X.,1,Noop(Processing an outgoing call)
+same => n,Dial(PJSIP/${EXTEN}@sipgate)
+same => n,Hangup()

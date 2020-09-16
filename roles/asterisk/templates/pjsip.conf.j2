@@ -1,0 +1,167 @@
+; endpoints -> every possible endpoint like softphones, hardphones, trunks, gateways
+; transport -> defines transport settings like ports, ip range 
+; auth -> auth settings 
+; aor -> address of record
+; identify -> auth via address/ip
+
+;=========== GLOBALS ===========
+[global]
+type = global
+user_agent = Asterisk PBX
+endpoint_identifier_order = ip,username
+
+;=========== TRANSPORTS ===========
+[transport-udp-sipgate]
+type = transport
+protocol = udp
+bind = 0.0.0.0:16732
+;local_net = (TODO) Dieser Parameter identifiziert für PJSIP das lokale Netzwerk. Das wird in NAT-Szenarien relevant.
+
+[transport-udp]
+type = transport
+protocol = udp
+bind = 0.0.0.0
+
+;=========== TRUNK ===========
+; SIPGATE.DE CONFIG
+[reg_sipgate](!)
+type = registration
+retry_interval = 20
+max_retries = 10
+expiration = 120
+transport = transport-udp-sipgate
+server_uri = sip:sipconnect.sipgate.de:5060
+
+[auth_reg_sipgate](!)
+type = auth
+
+[sipgate_aor](!)
+type = aor
+
+[sipgate_identity](!)
+type = identify
+match = sipconnect.sipgate.de
+
+[sipgate_auth](!)
+type = auth
+
+[sipgate_endpoint](!)
+type = endpoint
+dtmf_mode = rfc4733
+;disallow = all
+allow = {{ asterisk_codecs_to_use }}
+rtp_symmetric = yes
+force_rport = yes
+rewrite_contact = yes
+timers = yes
+from_domain = sipconnect.sipgate.de
+language = en
+
+
+;=== TRUNK A
+[sipgate_reg_a](reg_sipgate)
+contact_user = {{ sip_id_a }}
+client_uri = sip:{{ sip_id_a }}@sipconnect.sipgate.de:5060
+outbound_auth = auth_reg_sipgate_a
+
+[auth_reg_sipgate_a](auth_reg_sipgate)
+username = {{ sip_id_a }}
+password = {{ sip_pw_a }}
+
+[sipgate_identity_a](sipgate_identity)
+endpoint = sipgate_endpoint_a
+
+[sipgate_aor_a](sipgate_aor)
+contact = sip:{{ sip_id_a }}@sipconnect.sipgate.de
+
+[sipgate_auth_a](sipgate_auth)
+username = {{ sip_id_a }}
+password = {{ sip_pw_a }}
+
+[sipgate_endpoint_a](sipgate_endpoint) 
+context = sipgate-in
+from_user = {{ sip_id_a }}
+outbound_auth = sipgate_auth_a
+aors = sipgate_aor_a
+
+
+;=== TRUNK B
+[sipgate_reg_b](reg_sipgate)
+contact_user = {{ sip_id_b }}
+client_uri = sip:{{ sip_id_b }}@sipconnect.sipgate.de:5060
+outbound_auth = auth_reg_sipgate_b
+
+[auth_reg_sipgate_b](auth_reg_sipgate)
+username = {{ sip_id_b }}
+password = {{ sip_pw_b }}
+
+[sipgate_identity_b](sipgate_identity)
+endpoint = sipgate_endpoint_b
+
+[sipgate_aor_b](sipgate_aor)
+contact = sip:{{ sip_id_b }}@sipconnect.sipgate.de
+
+[sipgate_auth_b](sipgate_auth)
+username = {{ sip_id_b }}
+password = {{ sip_pw_b }}
+
+[sipgate_endpoint_b](sipgate_endpoint) 
+context = sipgate-in
+from_user = {{ sip_id_b }}
+outbound_auth = sipgate_auth_b
+aors = sipgate_aor_b
+
+
+;=========== FREESWITCH (BBB) ENDPOINT ===========
+;[webconf]
+;type = identify
+;endpoint = webconf
+;match = DOMAIN.TLD
+
+;===== WEBCONF ENDPOINT TEMPLATE
+[webconf-endpoint](!)
+type = endpoint
+context = default
+trust_id_inbound = yes
+trust_id_outbound = yes
+;disallow = all
+allow = {{ asterisk_codecs_to_use }}
+transport = transport-udp
+
+[webconf-auth](!)
+type = auth
+auth_type = userpass
+
+[webconf-aor](!)
+type = aor
+max_contacts = 50
+
+;===== WEBCONF ENDPOINTS START
+{% for machine in machines if machines[machine].create_endpoint %}
+;=== {{ machine }}
+{% if machines[machine].sip_phone and machines[machine].sip_password %}
+[{{ machine.split(".")[0] | lower }}](webconf-endpoint)
+auth = {{ machine.split(".")[0] | lower }}
+aors = {{ machine.split(".")[0] | lower }}
+
+[{{ machine.split(".")[0] | lower }}](webconf-auth)
+username = {{ machine.split(".")[0] | lower }}
+password = {{ machines[machine].sip_password }}
+
+[{{ machine.split(".")[0] | lower }}](webconf-aor)
+
+{% endif %}
+{% endfor %} 
+;===== WEBCONF ENDPOINTS END
+
+;=========== ACL ===========
+[acl]
+type=acl
+deny=0.0.0.0/0.0.0.0
+; sipgate.de ipv4 for trunking
+; https://teamhelp.sipgate.de/hc/de/articles/203571242-IP-und-Port-Bereiche-von-sipgate
+permit=217.10.68.150
+; generated permits from machines (via dig dns lookup)
+{% for machine in machines if machines[machine].create_endpoint %}
+permit={{ lookup("dig", machine)}}
+{% endfor %}

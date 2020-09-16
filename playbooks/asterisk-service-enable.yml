@@ -1,0 +1,20 @@
+---
+- hosts: all
+  become: yes
+  tasks:
+  - name: enable and start asterisk.service
+    become: yes
+    systemd:
+      name: asterisk
+      state: started
+      enabled: yes
+
+  - name: ufw allow known services
+    firewalld:
+      port: '{{ item.port }}/{{ item.proto }}'
+      state: enabled
+      permanent: yes
+      immediate: yes
+    with_items:
+      - { port: '5060', proto: 'udp'} # SIP on UDP port 5060
+      - { port: '4569', proto: 'udp'} # IAX2

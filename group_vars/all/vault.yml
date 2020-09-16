@@ -1,0 +1,11 @@
+---
+# sipgate.de credentials
+# TRUNK A
+vault_sipgate_id_a: 'TRUNK_ID' # trunk id (string)
+vault_sipgate_pw_a: 'TRUNK_PW' # trunk password (string)
+# TRUNK B
+vault_sipgate_id_b: 'TRUNK_ID'
+vault_sipgate_pw_b: 'TRUNK_PW'
+
+vault_prometheus:
+  password: PROMETHEUS_PASSWORD # for asterisk res_prometheus plugin (used for basic auth via nginx)

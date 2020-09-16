@@ -1,0 +1,100 @@
+---
+- name: install dependencies (RedHat)
+  dnf:
+    name:
+      - nginx
+      - python3-passlib
+      - python3-libselinux
+      - python3-libsemanage
+
+- name: copy nginx configuration
+  become: yes
+  template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: 0644
+  notify: reload nginx
+
+- name: create nginx folders
+  become: yes
+  file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+    recurse: yes
+  with_items:
+    - {
+        path: "/etc/nginx/sites-enabled",
+        owner: "root",
+        group: "root",
+        mode: "0744",
+      }
+    - {
+        path: "/etc/nginx/sites-available",
+        owner: "root",
+        group: "root",
+        mode: "0744",
+      }
+    - {
+      path: "/etc/nginx/ssl",
+      owner: "root",
+      group: "root",
+      mode: "0755",
+    }
+  notify: reload nginx
+
+- name: dhparam # add dhparam.pem file to roles/nginx/files folder
+  copy:
+    src: '{{ item.key }}'
+    dest: /etc/nginx/{{ item.value }}
+    owner: root
+    group: root
+    force: false
+    mode: '0640'
+  loop:
+    - key: dhparam.pem
+      value: 'ssl/dhparam.pem'
+
+- name: create prometheus api user
+  htpasswd:
+    path: /etc/nginx/.htpasswd
+    name: '{{ prometheus.user }}'
+    password: '{{ prometheus.password }}'
+    owner: root
+    group: nginx
+    mode: 0640
+  notify: reload nginx
+
+- name: ensure nginx service is enabled and running
+  service:
+    name: nginx
+    state: started
+    enabled: yes
+
+- name: allow nginx to act as reverse proxy
+  seboolean:
+    name: httpd_can_network_connect
+    state: yes
+    persistent: yes
+
+- name: enable and start firewalld
+  service:
+    name: firewalld
+    state: started
+    enabled: yes
+
+- name: allow services (firewalld)
+  firewalld:
+    service: "{{ item.name }}"
+    state: enabled
+    permanent: yes
+    immediate: yes
+    zone: "{{ item.zone }}"
+  with_items:
+    - { name: http, zone: public }
+    - { name: https, zone: public }
+  notify: reload firewall

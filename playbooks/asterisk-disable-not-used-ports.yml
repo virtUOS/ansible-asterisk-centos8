@@ -1,0 +1,13 @@
+---
+- hosts: all
+  become: yes
+  tasks:
+  - name: firewalld disable asterisk ports
+    firewalld:
+      port: '{{ item.port }}/{{ item.proto }}'
+      state: disabled
+      permanent: yes
+      immediate: yes
+    with_items:
+        - { port: '4569', proto: 'udp'} # IAX2
+        - { port: '8089', proto: 'tcp'} # asterisk mini-http server

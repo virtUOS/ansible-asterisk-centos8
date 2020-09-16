@@ -1,0 +1,13 @@
+sip_endpoints_secrets:
+  HOST1:
+    create_endpoint: true
+    sip_phone: 491234999999 # schema 491234999999
+    sip_password: SIP_PASSWORD # generate strong password
+  HOST2:
+    create_endpoint: true
+    sip_phone: 491234888888
+    sip_password: SIP_PASSWORD
+  HOST3:
+    create_endpoint: true
+    sip_phone: 491234777777
+    sip_password: SIP_PASSWORD

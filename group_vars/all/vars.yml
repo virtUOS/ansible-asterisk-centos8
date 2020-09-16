@@ -1,0 +1,25 @@
+---
+sip_endpoints: '{{ sip_endpoints_secrets }}'
+
+# SIP secrets
+sip_id_a: '{{ vault_sipgate_id_a }}'
+sip_pw_a: '{{ vault_sipgate_pw_a }}'
+sip_id_b: '{{ vault_sipgate_id_b }}'
+sip_pw_b: '{{ vault_sipgate_pw_b }}'
+
+# Asterisk install
+asterisk_url: 'https://downloads.asterisk.org/pub/telephony/asterisk/releases/'
+asterisk_file_name: 'asterisk-17.6.0.tar.gz'
+asterisk_file_sha256: '39f5d95809f5493f2ae057202850f083bfa16f659dc4c5bf3331ff089f0a4431'
+asterisk_install_path: '/opt/asterisk'
+asterisk_fresh_install: 'no'
+asterisk_install_sample_config: 'no' #only if ansible_fresh_install == 'yes'
+
+# Asterisk config
+asterisk_codecs_to_use: 'opus,alaw'
+
+# credentials for prometheus basic auth
+# and prometheus exporter to check
+prometheus:
+  user: prometheus
+  password: '{{ vault_prometheus.password }}'
